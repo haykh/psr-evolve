@@ -1,0 +1,4 @@
+{
+  "extraPaths": ["./"],
+  "reportOperatorIssue": "none"
+}

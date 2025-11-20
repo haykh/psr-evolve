@@ -1,0 +1,9 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "ms-toolsai.jupyter",
+    "ms-python.black-formatter",
+    "ms-python.vscode-python-envs",
+    "ms-pyright.pyright"
+  ]
+}
