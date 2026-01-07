@@ -46,3 +46,9 @@ ax.scatter(
     zorder=-1,
 )
 ```
+
+# References
+
+- The Galactic population of canonical pulsars - II: https://arxiv.org/pdf/2406.12612
+- The Parkes multibeam pulsar survey: VI. Discovery and
+timing of 142 pulsars and a Galactic population analysis: https://arxiv.org/pdf/astro-ph/0607640

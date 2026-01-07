@@ -1,8 +1,6 @@
-import os
 from typing import Callable
 import numpy as np
 import numpy.typing as npt
-import pandas as pd
 from oompy import Constants as c, Units as u, Quantity
 from tqdm import tqdm
 
@@ -11,25 +9,6 @@ import matplotlib.pyplot as plt
 
 CONSTANTS = {
     "sun_position": np.array([8.5, 0, 0]),
-    "init_model": {
-        "position": {  # Table 7, Model C in paper
-            "B": 1.90,
-            "C": 5.0,
-            "E": 0.18,
-        },
-        "Bsurf": {
-            "mean_log10": 12.65,
-            "std_log10": 0.55,
-        },
-        "P": {
-            "mean": 0.3,
-            "std": 0.15,
-            "threshold": 0.85e-3,
-        },
-    },
-    "detectability": {
-        "h_em": 3e5 * u.m,
-    },
 }
 
 
@@ -158,12 +137,12 @@ class Pulsars:
         """Returns the current spin-down luminosities for all pulsars."""
         return ((4 * c.pi**2 * self.I) >> "erg sec^2").value * self.Pdots / self.Ps**3
 
-    def new(self, number: int):
+    def new(self, number: int, params: dict):
         number = int(number)
         R_sun = CONSTANTS["sun_position"][0]
-        B = CONSTANTS["init_model"]["position"]["B"]
-        C = CONSTANTS["init_model"]["position"]["C"]
-        E = CONSTANTS["init_model"]["position"]["E"]
+        B = params["init_model"]["position"]["B"]
+        C = params["init_model"]["position"]["C"]
+        E = params["init_model"]["position"]["E"]
 
         rng = np.random.default_rng()
 
@@ -186,18 +165,18 @@ class Pulsars:
 
         while len(spin_periods_sec) < number:
             one = np.random.normal(
-                loc=CONSTANTS["init_model"]["P"]["mean"],
-                scale=CONSTANTS["init_model"]["P"]["std"],
+                loc=params["init_model"]["P"]["mean"],
+                scale=params["init_model"]["P"]["std"],
                 size=number,
             )
-            two = one[one > CONSTANTS["init_model"]["P"]["threshold"]]
+            two = one[one > params["init_model"]["P"]["threshold"]]
             spin_periods_sec.extend(two.tolist())
 
         spin_periods_sec = np.array(spin_periods_sec[:number])
 
         log_bfield_G = rng.normal(
-            loc=CONSTANTS["init_model"]["Bsurf"]["mean_log10"],
-            scale=CONSTANTS["init_model"]["Bsurf"]["std_log10"],
+            loc=params["init_model"]["Bsurf"]["mean_log10"],
+            scale=params["init_model"]["Bsurf"]["std_log10"],
             size=number,
         )
         bfield_G = 10**log_bfield_G
@@ -226,10 +205,12 @@ class Pulsars:
         self.ages = self.ages[mask_array]
 
     def select(
-        self, selection_criteria: Callable[["Pulsars"], npt.NDArray[np.bool_]]
+        self,
+        selection_criteria: Callable[["Pulsars", dict], npt.NDArray[np.bool_]],
+        params: dict,
     ) -> "Pulsars":
         """Selects pulsars based on the selection_criteria."""
-        select_array = selection_criteria(self)
+        select_array = selection_criteria(self, params)
         return Pulsars.from_arrays(
             positions=self.positions[select_array],
             incl_angles=self.incl_angles[select_array],
@@ -241,13 +222,13 @@ class Pulsars:
         )
 
 
-def Detectable_Geometric(pulsars: Pulsars) -> npt.NDArray[np.bool_]:
+def Detectable_Geometric(pulsars: Pulsars, params: dict) -> npt.NDArray[np.bool_]:
     """Returns a boolean array indicating which pulsars are detectable
     based on geometric considerations."""
 
     xis = np.arccos(np.sum(pulsars.spin_axes * pulsars.dirs_towards, axis=1))
 
-    h_dimless = ((CONSTANTS["detectability"]["h_em"] / c.c) >> "sec").value
+    h_dimless = ((params["detectability"]["h_em"] / c.c) >> "sec").value
 
     rhos = 3 * np.sqrt(np.pi * h_dimless / (2 * pulsars.Ps))
 
@@ -261,7 +242,7 @@ def Detectable_Geometric(pulsars: Pulsars) -> npt.NDArray[np.bool_]:
     )
 
 
-def Detectable_Radioflux(pulsars: Pulsars) -> npt.NDArray[np.bool_]:
+def Detectable_Radioflux(pulsars: Pulsars, params: dict) -> npt.NDArray[np.bool_]:
     """Returns a boolean array indicating which pulsars are detectable
     based on radio flux considerations."""
 
@@ -269,7 +250,7 @@ def Detectable_Radioflux(pulsars: Pulsars) -> npt.NDArray[np.bool_]:
 
     xis = np.arccos(np.sum(pulsars.spin_axes * pulsars.dirs_towards, axis=1))
 
-    h_dimless = ((CONSTANTS["detectability"]["h_em"] / c.c) >> "sec").value
+    h_dimless = ((params["detectability"]["h_em"] / c.c) >> "sec").value
 
     rhos = 3 * np.sqrt(np.pi * h_dimless / (2 * pulsars.Ps))
 
@@ -279,7 +260,7 @@ def Detectable_Radioflux(pulsars: Pulsars) -> npt.NDArray[np.bool_]:
         9
         * pulsars.distances**-2
         * (pulsars.Edots * erg_s_to_W / 1e29) ** 0.25
-        * 10 ** rng.normal(loc=0.0, scale=0.8, size=pulsars.number)
+        * 10 ** rng.normal(loc=0.0, scale=0.2, size=pulsars.number)
     )
 
     delta_f_ch_Hz = 3e3 * 1e3
@@ -309,7 +290,7 @@ def Detectable_Radioflux(pulsars: Pulsars) -> npt.NDArray[np.bool_]:
 
     S_min_survey_mJy = 0.05 * np.sqrt(1 / ((pulsars.Ps / tilda_w_r) - 1))
 
-    return Fr_mJy >= S_min_survey_mJy
+    return Fr_mJy / S_min_survey_mJy >= 10
 
 
 def Above_Deathline(pulsars: Pulsars, beta: float = 0.05) -> npt.NDArray[np.bool_]:
@@ -318,6 +299,7 @@ def Above_Deathline(pulsars: Pulsars, beta: float = 0.05) -> npt.NDArray[np.bool
 
 
 def Simulate_Evolution(
+    params: dict,
     birth_rate: float,
     total_time: float,
     time_step: float | None = None,
@@ -339,7 +321,7 @@ def Simulate_Evolution(
     """
     pulsars = Pulsars(nbraking)
     if time_step is None:
-        pulsars.new(int(birth_rate * total_time))
+        pulsars.new(int(birth_rate * total_time), params)
         rng = np.random.default_rng()
         pulsars.ages = rng.uniform(0, total_time, size=pulsars.number)
         if beta is not None:
@@ -351,7 +333,7 @@ def Simulate_Evolution(
             # Determine number of new pulsars to add
             num_new_pulsars = np.random.poisson(birth_rate * time_step)
             if num_new_pulsars > 0:
-                pulsars.new(num_new_pulsars)
+                pulsars.new(num_new_pulsars, params)
             # Apply deathline mask if beta is provided
             if beta is not None:
                 pulsars.mask(Above_Deathline(pulsars, beta))
@@ -422,30 +404,40 @@ def Plot_PPdot(
     return ax
 
 
-def Read_Catalogue(dbfile="psrcat.db") -> pd.DataFrame:
-    assert os.path.exists(dbfile), f"Catalogue file {dbfile} does not exist."
+def Read_Catalogue(dbfile="data.txt") -> dict[str, npt.NDArray[np.str_]]:
+    header = [
+        "#",
+        "NAME",
+        "",
+        "P0",
+        "",
+        "",
+        "P1",
+        "",
+        "",
+        "W50",
+        "",
+        "",
+        "W10",
+        "",
+        "",
+        "S400",
+        "",
+        "",
+        "S1400",
+        "",
+        "",
+        "S2000",
+        "",
+        "",
+        "DIST",
+        "DIST_DM",
+        "",
+        "ZZ",
+        "XX",
+        "YY",
+    ]
 
-    data = []
-    with open(dbfile, "r") as f:
-        current_pulsar = {}
-        for line in f:
-            line = line.strip()
-            if line.startswith("#") or not line:
-                continue
-            parts = line.split()
-            if len(parts) > 1:
-                key = parts[0]
-                value = parts[1]
-                current_pulsar[key] = value
-            if line.startswith("PSRJ"):
-                if current_pulsar:
-                    data.append(current_pulsar)
-                current_pulsar = {}
-                key = parts[0]
-                value = parts[1]
-                current_pulsar[key] = value
+    data = np.loadtxt(dbfile, dtype="str")
 
-        if current_pulsar != {}:
-            data.append(current_pulsar)
-
-    return pd.DataFrame(data)
+    return {k: data[:, i] for i, k in enumerate(header) if k != ""}
