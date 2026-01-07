@@ -137,6 +137,7 @@ class Pulsars:
         """Returns the current spin-down luminosities for all pulsars."""
         return ((4 * c.pi**2 * self.I) >> "erg sec^2").value * self.Pdots / self.Ps**3
 
+    # PASS DISTRIBUTION FUNCTION FOR R and Z, THEN USE THAT TO SAMPLE
     def new(self, number: int, params: dict):
         number = int(number)
         R_sun = CONSTANTS["sun_position"][0]
