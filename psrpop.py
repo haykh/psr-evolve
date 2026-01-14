@@ -1,6 +1,8 @@
 from typing import Callable
 import numpy as np
 import numpy.typing as npt
+from scipy.interpolate import PchipInterpolator
+from scipy.spatial.distance import cdist
 from oompy import Constants as c, Units as u, Quantity
 from tqdm import tqdm
 
@@ -10,6 +12,39 @@ import matplotlib.pyplot as plt
 CONSTANTS = {
     "sun_position": np.array([8.5, 0, 0]),
 }
+
+
+def invert_monotone(xs, ys):
+    order = np.argsort(ys)
+    y_sorted = ys[order]
+    x_sorted = xs[order]
+
+    y_unique, idx = np.unique(y_sorted, return_index=True)
+    x_unique = x_sorted[idx]
+
+    inv = PchipInterpolator(y_unique, x_unique, extrapolate=False)
+    y_min, y_max = y_unique[0], y_unique[-1]
+    return inv, (y_min, y_max)
+
+
+class Distribution:
+    def __init__(self, xmin, xmax, pdf, **kwargs):
+        self.xmin = xmin
+        self.xmax = xmax
+        self.pdf = pdf
+
+        resolution = 1000001
+        xs = np.linspace(xmin, xmax, resolution)
+        cdf_ys = np.cumsum(self.pdf(xs, **kwargs)) * (xmax - xmin) / resolution
+        self._invcdf_interpolated, (self._invcdf_min, self._invcdf_max) = (
+            invert_monotone(xs, cdf_ys)
+        )
+
+    def sample(self, size=1):
+        return self._invcdf_interpolated(
+            np.random.random(size=size) * (self._invcdf_max - self._invcdf_min)
+            + self._invcdf_min
+        )
 
 
 class Pulsars:
@@ -140,15 +175,20 @@ class Pulsars:
     # PASS DISTRIBUTION FUNCTION FOR R and Z, THEN USE THAT TO SAMPLE
     def new(self, number: int, params: dict):
         number = int(number)
-        R_sun = CONSTANTS["sun_position"][0]
-        B = params["init_model"]["position"]["B"]
-        C = params["init_model"]["position"]["C"]
-        E = params["init_model"]["position"]["E"]
+        # R_sun = CONSTANTS["sun_position"][0]
+
+        radial_dist = params["init_model"]["radial_distribution"]
+        z_dist = params["init_model"]["z_distribution"]
+
+        # B = params["init_model"]["position"]["B"]
+        # C = params["init_model"]["position"]["C"]
+        # E = params["init_model"]["position"]["E"]
 
         rng = np.random.default_rng()
 
-        z_kpc_rnd = rng.laplace(loc=0.0, scale=E, size=number)
-        r_kpc_rnd = rng.gamma(shape=B + 1.0, scale=R_sun / C, size=number)
+        z_kpc_rnd = z_dist.sample(size=number)
+        r_kpc_rnd = radial_dist.sample(size=number)
+        # rng.gamma(shape=B + 1.0, scale=R_sun / C, size=number)
         phi_rnd = 2 * np.pi * rng.random(number)
 
         x_kpc_rnd = r_kpc_rnd * np.cos(phi_rnd)
@@ -442,3 +482,50 @@ def Read_Catalogue(dbfile="data.txt") -> dict[str, npt.NDArray[np.str_]]:
     data = np.loadtxt(dbfile, dtype="str")
 
     return {k: data[:, i] for i, k in enumerate(header) if k != ""}
+
+
+def SampleDistance(A, B):
+    means_A = A.mean(axis=0)
+    vars_A = A.var(axis=0) / 2
+
+    A = (A - means_A) / vars_A
+    B = (B - means_A) / vars_A
+
+    nA = len(A)
+    nB = len(B)
+
+    diffAB = cdist(A, B).sum()
+    diffAA = cdist(A, A).sum()
+    diffBB = cdist(B, B).sum()
+
+    return (
+        (nA + nB)
+        / (nA * nB)
+        * (2 * diffAB / (nA * nB) - diffAA / nA**2 - diffBB / nB**2)
+    )
+
+
+def IsNormalPulsar(Ps, Pdots):
+    # criterion ms-pulsars
+    P1_lower, Pdot1_lower = 0.01, 1e-10  # (P, Pdot)
+    P2_lower, Pdot2_lower = 1.0, 1e-19  # (P, Pdot)
+
+    logP1_lower, logPdot1_lower = np.log10(P1_lower), np.log10(Pdot1_lower)
+    logP2_lower, logPdot2_lower = np.log10(P2_lower), np.log10(Pdot2_lower)
+
+    slope_lower = (logPdot2_lower - logPdot1_lower) / (logP2_lower - logP1_lower)
+    intercept_lower = logPdot1_lower - slope_lower * logP1_lower
+
+    # criterion magnetars
+    P1_upper, Pdot1_upper = 0.1, 1e-10
+    P2_upper, Pdot2_upper = 10.0, 1e-14
+
+    logP1_upper, logPdot1_upper = np.log10(P1_upper), np.log10(Pdot1_upper)
+    logP2_upper, logPdot2_upper = np.log10(P2_upper), np.log10(Pdot2_upper)
+
+    slope_upper = (logPdot2_upper - logPdot1_upper) / (logP2_upper - logP1_upper)
+    intercept_upper = logPdot1_upper - slope_upper * logP1_upper
+
+    return (Pdots < 10 ** (slope_upper * np.log10(Ps) + intercept_upper)) & (
+        Pdots > 10 ** (slope_lower * np.log10(Ps) + intercept_lower)
+    )
