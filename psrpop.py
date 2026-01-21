@@ -5,12 +5,13 @@ from scipy.interpolate import PchipInterpolator
 from scipy.spatial.distance import cdist
 from oompy import Constants as c, Units as u, Quantity
 from tqdm import tqdm
+import pygedm
 
 import matplotlib.pyplot as plt
 
 
 CONSTANTS = {
-    "sun_position": np.array([8.5, 0, 0]),
+    "sun_position": np.array([-8.5, 0, 0]),
 }
 
 
@@ -144,6 +145,20 @@ class Pulsars:
         )
 
     @property
+    def GalLs(self) -> npt.NDArray[np.float64]:
+        del_xs = self.positions[:, 0] - CONSTANTS["sun_position"][0]
+        del_ys = self.positions[:, 1]
+        return np.arctan2(del_ys, del_xs)
+
+    @property
+    def GalBs(self) -> npt.NDArray[np.float64]:
+        del_xs = self.positions[:, 0] - CONSTANTS["sun_position"][0]
+        del_ys = self.positions[:, 1]
+        del_zs = self.positions[:, 2]
+        del_dxys = np.sqrt(del_xs**2 + del_ys**2)
+        return np.arctan(del_zs / del_dxys)
+
+    @property
     def Pdot0s(self) -> npt.NDArray[np.float64]:
         """Returns the initial period derivatives at birth for all pulsars."""
         yr_to_sec = (u.yr >> "sec").value
@@ -166,6 +181,13 @@ class Pulsars:
         """Returns the current surface magnetic fields for all pulsars."""
         power = -(self.nbraking - 3) / (2 * (self.nbraking - 1))
         return self.Bsurf0s * (1 + self.ages / self.tau0s) ** power
+    
+    @property
+    def DMs(self) -> npt.NDArray[np.float64]:
+        return np.array([
+            pygedm.dist_to_dm(l * 180 / np.pi, b * 180 / np.pi, d * 1e3)[0].value
+            for l, b, d in zip(self.GalLs, self.GalBs, self.distances)
+        ])
 
     @property
     def Edots(self) -> npt.NDArray[np.float64]:
@@ -307,9 +329,20 @@ def Detectable_Radioflux(pulsars: Pulsars, params: dict) -> npt.NDArray[np.bool_
     delta_f_ch_Hz = 3e3 * 1e3
     f_Hz = 1.374 * 1e9
     DM_pc_cm3 = pulsars.distances * 0.017 * 1e3
-    tau_DM_sec = 8.3e15 * delta_f_ch_Hz * DM_pc_cm3 / f_Hz**3
-    tau_scat_sec = 3.6e-9 * DM_pc_cm3**2.2 * (1 + 1.94e-3 * DM_pc_cm3**2)
-    tau_samp_sec = 250e-6
+    tau_DM_sec = (
+        params["detectability"]["tau_DM_coeff"]
+        * 8.3e15
+        * delta_f_ch_Hz
+        * DM_pc_cm3
+        / f_Hz**3
+    )
+    tau_scat_sec = (
+        params["detectability"]["tau_scat_coeff"]
+        * 3.6e-9
+        * DM_pc_cm3**2.2
+        * (1 + 1.94e-3 * DM_pc_cm3**2)
+    )
+    tau_samp_sec = params["detectability"]["tau_samp_coeff"] * 250e-6
 
     alphas = np.where(
         np.abs(xis - pulsars.incl_angles) <= rhos,
@@ -327,6 +360,11 @@ def Detectable_Radioflux(pulsars: Pulsars, params: dict) -> npt.NDArray[np.bool_
             + tau_scat_sec**2
         )
     ) ** 0.5
+    params["dummy"]["w_r"] = w_r
+    params["dummy"]["w_r_P"] = (w_r * pulsars.Ps / (2 * np.pi)) ** 2
+    params["dummy"]["tau_samp_sec"] = tau_samp_sec**2
+    params["dummy"]["tau_DM_sec"] = tau_DM_sec**2
+    params["dummy"]["tau_scat_sec"] = tau_scat_sec**2
     tilda_w_r = np.where(tilda_w_r > pulsars.Ps, pulsars.Ps * 0.99, tilda_w_r)
 
     S_min_survey_mJy = 0.05 * np.sqrt(1 / ((pulsars.Ps / tilda_w_r) - 1))
