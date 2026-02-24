@@ -57,12 +57,14 @@ class Pulsars:
     ages: npt.NDArray[np.float64] = np.array([])  # shape: (n,), units: yr
     nbraking: float = 3.0
 
-    def __init__(self, nbraking: float = 3.0):
+    def __init__(self, nbraking: float = 3.0, dm_interpolator=None):
         self.nbraking: float = nbraking
 
         self.M: Quantity = Quantity(2, "Msun")
         self.R: Quantity = Quantity(11, "km")
         self.I: Quantity = (2 / 5) * self.M * self.R**2
+        
+        self.dm_interpolator = dm_interpolator
 
     @staticmethod
     def from_arrays(
@@ -193,6 +195,12 @@ class Pulsars:
     def Edots(self) -> npt.NDArray[np.float64]:
         """Returns the current spin-down luminosities for all pulsars."""
         return ((4 * c.pi**2 * self.I) >> "erg sec^2").value * self.Pdots / self.Ps**3
+    
+    @property
+    def int_DMs(self) -> npt.NDArray[np.float64] | None:
+        if self.dm_interpolator is None:
+            return None 
+        return self.dm_interpolator((self.GalLs * 180/np.pi, self.GalBs * 180/np.pi, self.distances * 1000)) 
 
     # PASS DISTRIBUTION FUNCTION FOR R and Z, THEN USE THAT TO SAMPLE
     def new(self, number: int, params: dict):
@@ -328,7 +336,9 @@ def Detectable_Radioflux(pulsars: Pulsars, params: dict) -> npt.NDArray[np.bool_
 
     delta_f_ch_Hz = 3e3 * 1e3
     f_Hz = 1.374 * 1e9
-    DM_pc_cm3 = pulsars.distances * 0.017 * 1e3
+    DM_pc_cm3 = pulsars.int_DMs # use actual pulsarDM instead of basic formula
+    if DM_pc_cm3 is None:
+        DM_pc_cm3 = pulsars.DMs
     tau_DM_sec = (
         params["detectability"]["tau_DM_coeff"]
         * 8.3e15
@@ -384,6 +394,7 @@ def Simulate_Evolution(
     time_step: float | None = None,
     nbraking: float = 3.0,
     beta: float | None = 0.05,
+    dm_interpolator=None,
 ) -> Pulsars:
     """
     Simulates the evolution of the pulsar population.
@@ -398,7 +409,7 @@ def Simulate_Evolution(
     Returns:
     Resulting Pulsars object
     """
-    pulsars = Pulsars(nbraking)
+    pulsars = Pulsars(nbraking, dm_interpolator=dm_interpolator)
     if time_step is None:
         pulsars.new(int(birth_rate * total_time), params)
         rng = np.random.default_rng()
