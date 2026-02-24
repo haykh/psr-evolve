@@ -181,13 +181,15 @@ class Pulsars:
         """Returns the current surface magnetic fields for all pulsars."""
         power = -(self.nbraking - 3) / (2 * (self.nbraking - 1))
         return self.Bsurf0s * (1 + self.ages / self.tau0s) ** power
-    
+
     @property
     def DMs(self) -> npt.NDArray[np.float64]:
-        return np.array([
-            pygedm.dist_to_dm(l * 180 / np.pi, b * 180 / np.pi, d * 1e3)[0].value
-            for l, b, d in zip(self.GalLs, self.GalBs, self.distances)
-        ])
+        return np.array(
+            [
+                pygedm.dist_to_dm(l * 180 / np.pi, b * 180 / np.pi, d * 1e3)[0].value
+                for l, b, d in zip(self.GalLs, self.GalBs, self.distances)
+            ]
+        )
 
     @property
     def Edots(self) -> npt.NDArray[np.float64]:
